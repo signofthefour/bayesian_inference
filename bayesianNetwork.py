@@ -132,7 +132,7 @@ class BayesianNetwork:
         
         return elim_vars
 
-    def sum_product(self, elim_vars):
+    def sum_product(self, elim_vars, factors):
         """
         Eliminate the non-query and non-evidence from factor set
         
@@ -142,16 +142,12 @@ class BayesianNetwork:
         return:
             sum_product
         """ 
-        phi_star = self.factors
+        phi_star = factors
         # pr = self.product_factors(self.factors[0], self.factors[1])
         # sum_by_i = self.sum_by_var('I', pr)
         # print(sum_by_i)
-        print(elim_vars)
         for var in elim_vars:
             all_phi = copy.deepcopy(phi_star)
-            print("=====================BEGIN=============================")
-            print(var)
-            print("=============")
             factor_star = None
             for factor in all_phi:
                 vars, probs = factor
@@ -160,8 +156,7 @@ class BayesianNetwork:
                     factor_star = self.product_factors(factor_star, factor)
             factor_star = self.sum_by_var(var, factor_star)
             phi_star.append(factor_star)
-            print(phi_star)
-            print("========================END=========================")
+        return phi_star
 
     
     def product_factors(self, f1, f2):
@@ -218,29 +213,49 @@ class BayesianNetwork:
         """
         vars, cases = factor
         res = []
-        sum_same_val = { }
-        for org_case in cases:
-            sum_same_val = org_case
+        while (len(cases) > 0):
+            org_case = cases[0]
             cases.remove(org_case)
-            del sum_same_val[var]
+            case_same_val = []
             for case in cases:
                 can_sum = True
                 for key, val in case.items():
                     if key != 'prob' and key != var:
-                        if org_case[key] != case[key]:
+                        if val != org_case[key]:
                             can_sum = False
                             break
                 if can_sum:
-                    sum_prob = sum_same_val['prob'] + case['prob']
-                    sum_same_val = {**case, **sum_same_val}
-                    sum_same_val['prob'] = sum_prob
-                    del sum_same_val[var]
-                    cases.remove(case)
-            tmp = copy.deepcopy(sum_same_val)
+                    org_case['prob'] += case['prob']
+                    case_same_val.append(case)
+            for case in case_same_val:
+                cases.remove(case)
+            tmp = copy.deepcopy(org_case)
+            del tmp[var]
             res.append(tmp)
+
         vars.remove(var)
         return (vars , res)
 
+    def elim_by_evidence(self, evidence_variables):
+        knew_evidence_keys = [key for key in evidence_variables.keys()]
+        res = []
+        for factor in self.factors:
+            vars, cases = factor
+            new_cases = copy.deepcopy(cases)
+            for case in cases:
+                factor_keys = [key for key in case.keys()]
+                can_del = False
+                for key in factor_keys:
+                    if key in knew_evidence_keys:
+                        if evidence_variables[key] == case[key]:
+                            continue
+                        else:
+                            can_del = True
+                            break
+                if can_del:
+                    new_cases.remove(case)
+            res.append((vars, new_cases))
+        return res
 
     def exact_inference(self, filename):
         result = 0
@@ -248,7 +263,24 @@ class BayesianNetwork:
         query_variables, evidence_variables = self.__extract_query(f.readline())
         # YOUR CODE HERE
         elim_vars = self.elim_vars(query_variables, evidence_variables)
-        self.sum_product(elim_vars)
+        if evidence_variables == { }:
+            phi_star = self.sum_product(elim_vars, self.factors)
+            for vars, cases in phi_star:
+                all_keys = [key for key in query_variables.keys()]
+                if vars == all_keys:
+                    for case in cases:
+                        is_result = True
+                        for var in vars:
+                            if query_variables[var] != case[var]:
+                                is_result = False
+                                break
+                        if is_result:
+                            result = case['prob']
+                            break
+        else:
+            new_factors = self.elim_by_evidence(evidence_variables)
+            phi_star = self.sum_product(elim_vars, new_factors)
+            print(phi_star)
 
         f.close()
         return result
