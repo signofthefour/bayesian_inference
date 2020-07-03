@@ -2,6 +2,8 @@ import numpy as np
 import copy
 
 def dict_product(l1, l2):
+    if (l1 == []):
+        return l2
     res = []
     for x in l1:
         for y in l2:
@@ -25,7 +27,7 @@ class BayesianNetwork:
                 'domain' : domain,
                 'shape' : shape,
                 'prob' : probabilities,
-                'conprob' : {},
+                'conprob' : [],
                 'children' : []
             }
         f.close()
@@ -48,13 +50,10 @@ class BayesianNetwork:
         for node in self.net:
             if len(self.net[node]['parents']) == 0:
                 for i in range(self.net[node]['shape']):
-                    self.net[node]['conprob'].update(
+                    self.net[node]['conprob'].append(
                         {
-                            self.net[node]['domain'][i] : [
-                                    {
-                                        'prob' : self.net[node]['prob'][i]
-                                    }
-                                ]
+                            node: self.net[node]['domain'][i],
+                            'prob' : self.net[node]['prob'][i]
                         }
                     )
             else:
@@ -84,11 +83,13 @@ class BayesianNetwork:
                             }
                         )
                     tmp_dict = copy.deepcopy(cases[0])
-                    self.net[node]['conprob'].update(
-                        {
-                            val : tmp_dict
-                        }
-                    )
+                    for d in tmp_dict:
+                        d.update(
+                            {
+                                node : val
+                            }
+                        )
+                        self.net[node]['conprob'].append(d)
         self.make_factor()
                 
     """
@@ -102,10 +103,11 @@ class BayesianNetwork:
             x.append(node)
             for p in self.net[node]['parents']:
                 x.append(p)
-            self.factors.append(x)
+            prob = self.net[node]['conprob']
+            self.factors.append((x, prob)) 
         
 
-    def elim_factor(self, query_variables, evidence_variables):    
+    def elim_vars(self, query_variables, evidence_variables):    
         """
         Get the factor that need eliminated
 
@@ -122,14 +124,15 @@ class BayesianNetwork:
         for key, val in evidence_variables.items():
             factors.append(key)
         
-        elim_factors = []
+        elim_vars = []
         for node in self.net:
             if node not in factors:
-                elim_factors.append(node)
+                elim_vars.append(node)
         
-        return elim_factors
+        
+        return elim_vars
 
-    def sum_product(self, elim_factors):
+    def sum_product(self, elim_vars):
         """
         Eliminate the non-query and non-evidence from factor set
         
@@ -138,10 +141,105 @@ class BayesianNetwork:
         
         return:
             sum_product
-        """
-        
-        print(elim_factors)
+        """ 
+        phi_star = self.factors
+        # pr = self.product_factors(self.factors[0], self.factors[1])
+        # sum_by_i = self.sum_by_var('I', pr)
+        # print(sum_by_i)
+        print(elim_vars)
+        for var in elim_vars:
+            all_phi = copy.deepcopy(phi_star)
+            print("=====================BEGIN=============================")
+            print(var)
+            print("=============")
+            factor_star = None
+            for factor in all_phi:
+                vars, probs = factor
+                if var in vars:
+                    phi_star.remove(factor)
+                    factor_star = self.product_factors(factor_star, factor)
+            factor_star = self.sum_by_var(var, factor_star)
+            phi_star.append(factor_star)
+            print(phi_star)
+            print("========================END=========================")
 
+    
+    def product_factors(self, f1, f2):
+        """
+        product two factor of network
+
+        args:
+            f1: first factor
+            f2: second factor
+        
+        return:
+            pr: production of both
+        """
+        if f1 is None:
+            return f2
+        vars1, cases1 = f1
+        vars2, cases2 = f2
+        pr_vars = vars1
+        for var in vars2:
+            if var not in pr_vars:
+                pr_vars.append(var)
+
+        pr_prob = []
+        for case1 in cases1:
+            for case2 in cases2:
+                can_product = True
+                for key1, val1 in case1.items():
+                    if key1 in vars2 and key1 != 'prob':
+                        for key2, val2 in case2.items():
+                            if key1 == key2:
+                                if val1 != val2:
+                                    can_product = False
+                                    break
+                product = 0
+                if (can_product):
+                    product = case1['prob'] * case2['prob']
+                    new_case = {**case1, **case2}
+                    new_case['prob'] = product
+                    pr_prob.append(new_case)
+
+        return pr_vars, pr_prob
+
+
+    def sum_by_var(self, var, factor):
+        """
+        eliminate the var from the factor
+
+        args:
+            var: the var that  should be eliminated after this
+            factor: the factor contains that var
+
+        return:
+            sum_by_var: neew factor without var
+        """
+        vars, cases = factor
+        res = []
+        sum_same_val = { }
+        for org_case in cases:
+            sum_same_val = org_case
+            cases.remove(org_case)
+            del sum_same_val[var]
+            for case in cases:
+                can_sum = True
+                for key, val in case.items():
+                    if key != 'prob' and key != var:
+                        if org_case[key] != case[key]:
+                            can_sum = False
+                            break
+                if can_sum:
+                    sum_prob = sum_same_val['prob'] + case['prob']
+                    sum_same_val = {**case, **sum_same_val}
+                    sum_same_val['prob'] = sum_prob
+                    del sum_same_val[var]
+                    cases.remove(case)
+            tmp = copy.deepcopy(sum_same_val)
+            res.append(tmp)
+        vars.remove(var)
+        return (vars , res)
 
 
     def exact_inference(self, filename):
@@ -149,8 +247,8 @@ class BayesianNetwork:
         f = open(filename, 'r')
         query_variables, evidence_variables = self.__extract_query(f.readline())
         # YOUR CODE HERE
-        elim_factors = self.elim_factor(query_variables, evidence_variables)
-        self.sum_product(elim_factors)
+        elim_vars = self.elim_vars(query_variables, evidence_variables)
+        self.sum_product(elim_vars)
 
         f.close()
         return result
