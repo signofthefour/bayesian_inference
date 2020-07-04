@@ -1,1 +1,1 @@
-I=Thap;D=De,L=Manh
+I=Thap;D=Kho,L=Manh

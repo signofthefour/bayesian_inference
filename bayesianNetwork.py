@@ -156,7 +156,12 @@ class BayesianNetwork:
                     factor_star = self.product_factors(factor_star, factor)
             factor_star = self.sum_by_var(var, factor_star)
             phi_star.append(factor_star)
-        return phi_star
+
+        phi = None
+        for factor in phi_star:
+            phi = self.product_factors(phi, factor)
+ 
+        return phi
 
     
     def product_factors(self, f1, f2):
@@ -265,31 +270,63 @@ class BayesianNetwork:
         elim_vars = self.elim_vars(query_variables, evidence_variables)
         if evidence_variables == { }:
             phi_star = self.sum_product(elim_vars, self.factors)
-            for vars, cases in phi_star:
-                all_keys = [key for key in query_variables.keys()]
-                if vars == all_keys:
-                    for case in cases:
-                        is_result = True
-                        for var in vars:
-                            if query_variables[var] != case[var]:
-                                is_result = False
-                                break
-                        if is_result:
-                            result = case['prob']
-                            break
+            vars, cases = phi_star
+            all_keys = [key for key in query_variables.keys()]
+            for case in cases:
+                is_result = True
+                for key in all_keys:
+                    if case[key] != query_variables[key]:
+                        is_result = False
+                        break
+                if is_result:
+                    result =case['prob']
+                    break 
         else:
             new_factors = self.elim_by_evidence(evidence_variables)
             phi_star = self.sum_product(elim_vars, new_factors)
-            print(phi_star)
+            print(self.factors)
+            all_evidence_keys = [key for key in evidence_variables.keys()]
+            all_query_keys = [key for key in query_variables.keys()]
+            vars, factors = phi_star
+            alpha = 0
+            for factor in factors:
+                is_result = True
+                for key in all_evidence_keys:
+                    if factor[key] != evidence_variables[key]:
+                        # We donnot have to handle the case that query and evidence have same key
+                        # cause its donot have knowledge value
+                        is_result = False
+                        break
+                if is_result:
+                    alpha += factor['prob']
+                    for key in all_query_keys:
+                        if factor[key] != query_variables[key]:
+                            is_result = False
+                            break
+                if is_result:
+                    result = factor['prob']
+            
+            result = result / alpha
+
 
         f.close()
         return result
 
+
+    def sampling_given_distribution(self):
+        cur_sample = { }
+        res = self.elim_by_evidence(cur_sample)
+        print(res)
+
     def approx_inference(self, filename):
         result = 0
         f = open(filename, 'r')
+        query_variables, evidence_variables = self.__extract_query(f.readline())
         # YOUR CODE HERE
-
+        print(self.factors)
+        print("-----------")
+        elim_vars = self.elim_vars(query_variables, evidence_variables)
+        self.sampling_given_distribution()
 
         f.close()
         return result
