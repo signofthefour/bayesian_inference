@@ -179,11 +179,12 @@ class BayesianNetwork:
             return f2
         vars1, cases1 = f1
         vars2, cases2 = f2
-        pr_vars = vars1
+        pr_vars = copy.deepcopy(vars1)
         for var in vars2:
             if var not in pr_vars:
                 pr_vars.append(var)
 
+        has_product = False
         pr_prob = []
         for case1 in cases1:
             for case2 in cases2:
@@ -197,11 +198,14 @@ class BayesianNetwork:
                                     break
                 product = 0
                 if (can_product):
+                    has_product = True
                     product = case1['prob'] * case2['prob']
                     new_case = {**case1, **case2}
                     new_case['prob'] = product
                     pr_prob.append(new_case)
 
+        if has_product == False:
+            pr_vars = vars1
         return pr_vars, pr_prob
 
 
@@ -241,10 +245,11 @@ class BayesianNetwork:
         vars.remove(var)
         return (vars , res)
 
-    def elim_by_evidence(self, evidence_variables):
+    def elim_by_evidence(self, evidence_variables, factors):
         knew_evidence_keys = [key for key in evidence_variables.keys()]
         res = []
-        for factor in self.factors:
+        factors = copy.deepcopy(factors)
+        for factor in factors:
             vars, cases = factor
             new_cases = copy.deepcopy(cases)
             for case in cases:
@@ -269,7 +274,8 @@ class BayesianNetwork:
         # YOUR CODE HERE
         elim_vars = self.elim_vars(query_variables, evidence_variables)
         if evidence_variables == { }:
-            phi_star = self.sum_product(elim_vars, self.factors)
+            factors = copy.deepcopy(self.factors)
+            phi_star = self.sum_product(elim_vars, factors)
             vars, cases = phi_star
             all_keys = [key for key in query_variables.keys()]
             for case in cases:
@@ -282,9 +288,9 @@ class BayesianNetwork:
                     result =case['prob']
                     break 
         else:
-            new_factors = self.elim_by_evidence(evidence_variables)
+            factors = copy.deepcopy(self.factors)
+            new_factors = self.elim_by_evidence(evidence_variables, factors)
             phi_star = self.sum_product(elim_vars, new_factors)
-            print(self.factors)
             all_evidence_keys = [key for key in evidence_variables.keys()]
             all_query_keys = [key for key in query_variables.keys()]
             vars, factors = phi_star
@@ -308,26 +314,149 @@ class BayesianNetwork:
             
             result = result / alpha
 
-
         f.close()
         return result
 
 
-    def sampling_given_distribution(self):
-        cur_sample = { }
-        res = self.elim_by_evidence(cur_sample)
-        print(res)
+    def sampling_given_distribution(self, evidence):
+        """
+        sampling a new sample from an initial state
+
+        args: 
+            evidence : initial for cur_sample
+        
+        return:
+            cur_sample: list of sample that is sampled by forward
+        """
+        cur_sample = evidence
+        all_nodes = [node for node  in  self.net]
+        factors = copy.deepcopy(self.factors)
+        for i in range(len(factors)):
+            node = factors[i][0][0]
+            cur_table = self.elim_by_evidence(cur_sample, [factors[i]])
+            all_nodes, cases = cur_table[0]
+            cur_distri = []
+            domain = []
+            for case in cases:
+                cur_distri.append(case['prob'])
+                if case[ node ] not in domain:
+                    domain.append(case[ node ])
+            sigma = np.std(cur_distri)
+            mu = np.mean(cur_distri)
+            cdf = np.cumsum(cur_distri)
+            random_val = np.random.normal(mu, sigma)
+            j = 0
+            for j in range(len(cdf)):
+                if random_val < cdf[j]:
+                    break
+            
+            cur_sample.update( {
+                node : domain[j]
+            })
+                
+        # distribution = np.zeros(100)
+        # mu, sigma = 0, 0.1
+        # distribution = np.random.normal(mu, sigma, 5000)
+        # distribution = np.reshape(distribution, (1000, 5))
+        # print(distribution)
+        # import matplotlib.pyplot as plt
+        # count, bins, ignored = plt.hist(distribution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    , 30, density=True)
+        # plt.plot(bins, 1/(sigma * np.sqrt(2 * np.pi)) * np.exp( - (bins - mu)**2 / (2 * sigma**2) ), linewidth=2, color='r')
+        # plt.show()
+        
+        # for node in self.net:
+        #     for val in self.net[node]['domain']:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
+
+        # print(cur_sample)
+        return cur_sample
+    
+
+
+    def gibbs_sampling(self, factors, X_s, P0, T):
+        """
+        
+        Use gibbs sampling algorithm to generate T new samples from first init P0
+
+        args:
+            factors: all factors  with their cumulative distribution function
+            X_s: sampling variables
+            P0: first state of chain
+            T: number of iterations
+
+        return: list of samples
+        """
+        init_factors = copy.deepcopy(factors)
+        res = []
+        P_cur = P0
+        # P_cur = {
+        #     'I' : 'Cao',
+        #     'D' : 'Kho',
+        #     'S' : 'Cao',
+        #     'L' : 'Manh',
+        #     'G' : 'A'
+        # }
+        P_new = []
+        for i in range(T):
+            P_new = copy.deepcopy(P_cur)
+            for X in X_s:
+                P_temp = copy.deepcopy(P_new)
+                del P_temp[X]
+                elimed_factors = self.elim_by_evidence(P_temp, init_factors)
+                table = None
+                for factor in elimed_factors:
+                    table = self.product_factors(table, factor)
+                distribution = []
+                domain = []
+                keys, cases = table
+                for case in cases:
+                    distribution.append(case['prob'])
+                    if case[X] not in domain:
+                        domain.append(case[X])
+
+                dis_sum = np.sum(distribution)
+                distribution = [val / dis_sum for val in distribution]
+                sigma = np.std(distribution)
+                mu = np.mean(distribution)
+                cdf = np.cumsum(distribution)
+                random_val = np.random.normal(mu, sigma)
+                j = 0
+                for j in range(len(domain)):
+                    if random_val < cdf[j]:
+                        break
+                P_new[X] = domain[j]
+                del P_temp
+            P_temp = copy.deepcopy(P_new)
+            res.append(P_temp)
+        return  res
+
 
     def approx_inference(self, filename):
         result = 0
         f = open(filename, 'r')
         query_variables, evidence_variables = self.__extract_query(f.readline())
         # YOUR CODE HERE
-        print(self.factors)
-        print("-----------")
-        elim_vars = self.elim_vars(query_variables, evidence_variables)
-        self.sampling_given_distribution()
+        nodes = [node for  node in self.net]
+        evidence_key = [key for key in evidence_variables.keys()]
+        sampling_var = []
+        for node in nodes:
+            if node not in evidence_key:
+                sampling_var.append(node)
+        P0 = self.sampling_given_distribution(evidence_variables)
+        T = 3000
+        res = self.gibbs_sampling(self.factors, sampling_var, P0, T)
+        count = 0
+        query_key = [key for key in query_variables.keys()]
+        for case in res:
+            is_query_case = True
+            for key, val in case.items():
+                if key in query_key:
+                    if val != query_variables[key]:
+                        is_query_case = False
+                        break
+            if is_query_case:
+                count+=1
 
+        result = count / T
         f.close()
         return result
 
